@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
-import { Copy, CheckCircle2 } from "lucide-react";
+import { Copy, CheckCircle2, Download } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { ScrollArea } from "@/components/ui/scroll-area";
 
@@ -30,6 +30,25 @@ export const ResultDisplay = ({ data }: ResultDisplayProps) => {
     });
   };
 
+  const downloadJson = () => {
+    const blob = new Blob([jsonOutput], {
+      type: "application/json",
+    });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = "combined-output.json";
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+
+    toast({
+      title: "Download Started",
+      description: "Your combined JSON file is being downloaded",
+    });
+  };
+
   return (
     <Card>
       <CardHeader>
@@ -43,24 +62,35 @@ export const ResultDisplay = ({ data }: ResultDisplayProps) => {
               {data.length} entries generated from combined files
             </CardDescription>
           </div>
-          <Button
-            onClick={copyToClipboard}
-            variant="outline"
-            size="sm"
-            className="gap-2"
-          >
-            {copied ? (
-              <>
-                <CheckCircle2 className="h-4 w-4" />
-                Copied!
-              </>
-            ) : (
-              <>
-                <Copy className="h-4 w-4" />
-                Copy JSON
-              </>
-            )}
-          </Button>
+          <div className="flex gap-2">
+            <Button
+              onClick={downloadJson}
+              variant="default"
+              size="sm"
+              className="gap-2"
+            >
+              <Download className="h-4 w-4" />
+              Download JSON
+            </Button>
+            <Button
+              onClick={copyToClipboard}
+              variant="outline"
+              size="sm"
+              className="gap-2"
+            >
+              {copied ? (
+                <>
+                  <CheckCircle2 className="h-4 w-4" />
+                  Copied!
+                </>
+              ) : (
+                <>
+                  <Copy className="h-4 w-4" />
+                  Copy JSON
+                </>
+              )}
+            </Button>
+          </div>
         </div>
       </CardHeader>
       <CardContent>
