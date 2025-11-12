@@ -76,33 +76,107 @@ const Index = () => {
       const policyText = await policyFile.text();
       const policyData: Record<string, PolicyEntry> = JSON.parse(policyText);
 
-      // Generate combined JSON
-      const results: GeneratedItem[] = [];
+      // Helper function to determine access type based on java_method_name and method
+      const determineAccessType = (javaMethodName: string, httpMethod: string): string | null => {
+        const methodLower = javaMethodName.toLowerCase();
+        const httpMethodUpper = httpMethod.toUpperCase();
+
+        // Rule 1: If java_method_name contains "create" AND method is POST -> map to "create"
+        if (methodLower.includes("create") && httpMethodUpper === "POST") {
+          return "create";
+        }
+
+        // Rule 2: If java_method_name contains "get" AND method is GET -> map to "read"
+        if (methodLower.includes("get") && httpMethodUpper === "GET") {
+          return "read";
+        }
+
+        // Additional fuzzy logic rules
+        if (methodLower.includes("update") || methodLower.includes("edit")) {
+          return "edit";
+        }
+
+        if (methodLower.includes("delete") && httpMethodUpper === "DELETE") {
+          return "delete";
+        }
+
+        if (methodLower.includes("copy")) {
+          return "copy";
+        }
+
+        // If unsure, return null (will result in empty rolePath)
+        return null;
+      };
+
+      // Helper function to find best matching policy path using fuzzy logic
+      const findBestPolicyMatch = (apiPath: string, policyPaths: string[]): string | null => {
+        // Extract key parts from API path (remove context_path, version, and common prefixes)
+        const apiPathClean = apiPath
+          .toLowerCase()
+          .replace(/^\/ctrm-api\/api\//, "")
+          .replace(/\/v\d+\//, "/")
+          .split("/")[0]; // Get the first meaningful segment
+
+        // Find policy paths that match
+        for (const policyPath of policyPaths) {
+          const policyPathClean = policyPath.toLowerCase().replace(/^\//, "");
+          
+          // Direct match
+          if (policyPathClean === apiPathClean) {
+            return policyPath;
+          }
+
+          // Partial match (e.g., "trade" matches "physicaltrade")
+          if (apiPathClean.includes(policyPathClean) || policyPathClean.includes(apiPathClean)) {
+            return policyPath;
+          }
+        }
+
+        return null;
+      };
+
+      // Generate combined JSON with unique entries
+      const resultsMap = new Map<string, GeneratedItem>();
 
       for (const apiEntry of apiMonitor) {
         const fullPath = `${apiEntry.context_path}${apiEntry.api}`;
         
-        // Find matching policy entries
-        for (const [policyPath, policyEntry] of Object.entries(policyData)) {
-          if (policyEntry["Grid Access"]) {
-            const gridAccess = policyEntry["Grid Access"];
-            
-            for (const [accessType, _] of Object.entries(gridAccess)) {
-              const rolePath = `${policyPath}.Grid Access.${accessType}`;
-              
-              results.push({
-                path: fullPath,
-                rolePath: [rolePath],
-              });
-            }
+        // Skip if already processed
+        if (resultsMap.has(fullPath)) {
+          continue;
+        }
+
+        // Determine the access type based on method
+        const accessType = determineAccessType(apiEntry.java_method_name, apiEntry.method);
+
+        // Find best matching policy
+        const policyPaths = Object.keys(policyData);
+        const bestPolicyMatch = findBestPolicyMatch(fullPath, policyPaths);
+
+        let rolePath: string[] = [];
+
+        if (bestPolicyMatch && accessType) {
+          const policyEntry = policyData[bestPolicyMatch];
+          
+          // Check if the policy has the Grid Access with the determined access type
+          if (policyEntry["Grid Access"] && policyEntry["Grid Access"][accessType]) {
+            rolePath = [`${bestPolicyMatch}.Grid Access.${accessType}`];
           }
         }
+
+        // Add to results (with empty rolePath if unsure)
+        resultsMap.set(fullPath, {
+          path: fullPath,
+          rolePath,
+        });
       }
+
+      const results = Array.from(resultsMap.values());
 
       setGeneratedJson(results);
       toast({
         title: "Processing Complete",
-        description: `Generated ${results.length} combined entries`,
+        description: `Generated ${results.length} unique entries`,
       });
     } catch (error) {
       console.error("Processing error:", error);
