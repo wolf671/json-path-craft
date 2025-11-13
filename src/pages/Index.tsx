@@ -285,18 +285,6 @@ const Index = () => {
                 {isProcessing ? "Processing..." : "Generate Combined JSON"}
               </Button>
 
-              {generatedJson && (
-                <Button
-                  onClick={downloadJson}
-                  variant="secondary"
-                  size="lg"
-                  className="flex-1 min-w-[200px]"
-                >
-                  <Download className="mr-2 h-4 w-4" />
-                  Download Result
-                </Button>
-              )}
-
               <Button
                 onClick={clearAll}
                 variant="outline"
