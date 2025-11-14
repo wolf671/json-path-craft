@@ -25,7 +25,7 @@ interface ComboboxProps {
   className?: string;
 }
 
-export function Combobox({
+export const Combobox = React.memo(function Combobox({
   value,
   onValueChange,
   options,
@@ -34,6 +34,13 @@ export function Combobox({
   className,
 }: ComboboxProps) {
   const [open, setOpen] = React.useState(false);
+  const [search, setSearch] = React.useState("");
+
+  const handleSelect = React.useCallback((currentValue: string) => {
+    onValueChange(currentValue === value ? "" : currentValue);
+    setOpen(false);
+    setSearch("");
+  }, [value, onValueChange]);
 
   return (
     <Popover open={open} onOpenChange={setOpen}>
@@ -49,33 +56,36 @@ export function Combobox({
         </Button>
       </PopoverTrigger>
       <PopoverContent className="w-full p-0" align="start">
-        <Command>
-          <CommandInput placeholder={`Search ${placeholder.toLowerCase()}...`} />
+        <Command shouldFilter={false}>
+          <CommandInput 
+            placeholder={`Search ${placeholder.toLowerCase()}...`}
+            value={search}
+            onValueChange={setSearch}
+          />
           <CommandList>
             <CommandEmpty>{emptyMessage}</CommandEmpty>
             <CommandGroup>
-              {options.map((option) => (
-                <CommandItem
-                  key={option}
-                  value={option}
-                  onSelect={(currentValue) => {
-                    onValueChange(currentValue === value ? "" : currentValue);
-                    setOpen(false);
-                  }}
-                >
-                  <Check
-                    className={cn(
-                      "mr-2 h-4 w-4",
-                      value === option ? "opacity-100" : "opacity-0"
-                    )}
-                  />
-                  <span className="truncate">{option}</span>
-                </CommandItem>
-              ))}
+              {options
+                .filter(option => !search || option.toLowerCase().includes(search.toLowerCase()))
+                .map((option) => (
+                  <CommandItem
+                    key={option}
+                    value={option}
+                    onSelect={handleSelect}
+                  >
+                    <Check
+                      className={cn(
+                        "mr-2 h-4 w-4",
+                        value === option ? "opacity-100" : "opacity-0"
+                      )}
+                    />
+                    <span className="truncate">{option}</span>
+                  </CommandItem>
+                ))}
             </CommandGroup>
           </CommandList>
         </Command>
       </PopoverContent>
     </Popover>
   );
-}
+});
