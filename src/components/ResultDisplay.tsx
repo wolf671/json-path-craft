@@ -7,22 +7,38 @@ import { ScrollArea } from "@/components/ui/scroll-area";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Input } from "@/components/ui/input";
+import { Combobox } from "@/components/ui/combobox";
+import Fuse from "fuse.js";
 
 interface GeneratedItem {
   path: string;
   rolePath: string[];
 }
 
-interface ResultDisplayProps {
-  data: GeneratedItem[];
+interface PolicyEntry {
+  info?: {
+    screenName?: string;
+    groupName?: string;
+  };
+  "Grid Access"?: {
+    [key: string]: string;
+  };
+  [key: string]: any;
 }
 
-export const ResultDisplay = ({ data }: ResultDisplayProps) => {
+interface ResultDisplayProps {
+  data: GeneratedItem[];
+  policyData: Record<string, PolicyEntry>;
+  onDataChange: (data: GeneratedItem[]) => void;
+}
+
+export const ResultDisplay = ({ data, policyData, onDataChange }: ResultDisplayProps) => {
   const [copied, setCopied] = useState(false);
   const { toast } = useToast();
 
   type EditableRow = {
     path: string;
+    route: string;
     roleBase: string | null;
     baseInferred: boolean;
     create: boolean;
@@ -33,37 +49,80 @@ export const ResultDisplay = ({ data }: ResultDisplayProps) => {
 
   const [rows, setRows] = useState<EditableRow[]>([]);
   const [selectAll, setSelectAll] = useState<boolean>(false);
+  
+  // Get all available routes from policy data
+  const policyRoutes = useMemo(() => {
+    return Object.keys(policyData || {});
+  }, [policyData]);
 
-  const inferRoleBaseFromPath = (apiPath: string): string | null => {
-    if (!apiPath) return null;
-    const cleaned = apiPath
+  // Fuzzy search to find best matching route for a given path
+  const findBestRouteMatch = (apiPath: string): string => {
+    if (!apiPath || policyRoutes.length === 0) return "";
+    
+    // Normalize apiPath
+    const apiClean = apiPath
       .toLowerCase()
-      .replace(/^\/ctrm-api\/api\//, "/")
-      .replace(/\/v\d+\//, "/")
-      .replace(/\/+/, "/");
-    const firstSegment = cleaned.split("/").filter(Boolean)[0];
-    if (!firstSegment) return null;
-    return `/${firstSegment}.Grid Access`;
+      .replace(/^\/?ctrm-api\/api\/?/, "")
+      .replace(/^\/?api\/?/, "")
+      .replace(/\/v\d+(\.\d+)?\//g, "/")
+      .replace(/^\/|\/$/g, "");
+
+    // Use Fuse.js for fuzzy search
+    const fuse = new Fuse(policyRoutes, {
+      includeScore: true,
+      threshold: 0.4,
+      keys: [""],
+    });
+
+    const results = fuse.search(apiClean);
+    if (results.length > 0) {
+      return results[0].item;
+    }
+
+    return policyRoutes[0] || "";
+  };
+
+  const inferRoleBaseFromRoute = (route: string): string | null => {
+    if (!route) return null;
+    return `${route}.Grid Access`;
   };
 
   useEffect(() => {
+    if (data.length === 0) return;
+    
     setRows(
-      data.map((item) => ({
-        path: item.path,
-        // derive base and access flags from existing rolePath entries
-        roleBase: (() => {
-          if (!item.rolePath || item.rolePath.length === 0) return null;
+      data.map((item) => {
+        // Derive route and roleBase from existing rolePath entries
+        let route = "";
+        let roleBase: string | null = null;
+        
+        if (item.rolePath && item.rolePath.length > 0) {
           const first = item.rolePath[0];
-          const lastDot = first.lastIndexOf(".");
-          if (lastDot === -1) return null;
-          return first.slice(0, lastDot);
-        })(),
-        baseInferred: !(item.rolePath && item.rolePath.length > 0),
-        create: item.rolePath?.some((rp) => /\.create$/i.test(rp)) ?? false,
-        read: item.rolePath?.some((rp) => /\.read$/i.test(rp)) ?? false,
-        edit: item.rolePath?.some((rp) => /\.edit$/i.test(rp)) ?? false,
-        selected: false,
-      })),
+          // Extract route from rolePath (e.g., "/route.Grid Access.create" -> "/route")
+          const gridAccessIndex = first.indexOf(".Grid Access");
+          if (gridAccessIndex !== -1) {
+            route = first.slice(0, gridAccessIndex);
+            roleBase = first.slice(0, first.lastIndexOf("."));
+          }
+        }
+        
+        // If no route found, use fuzzy search to find best match
+        if (!route) {
+          route = findBestRouteMatch(item.path);
+          roleBase = inferRoleBaseFromRoute(route);
+        }
+
+        return {
+          path: item.path,
+          route,
+          roleBase,
+          baseInferred: !(item.rolePath && item.rolePath.length > 0),
+          create: item.rolePath?.some((rp) => /\.create$/i.test(rp)) ?? false,
+          read: item.rolePath?.some((rp) => /\.read$/i.test(rp)) ?? false,
+          edit: item.rolePath?.some((rp) => /\.edit$/i.test(rp)) ?? false,
+          selected: false,
+        };
+      }),
     );
     setSelectAll(false);
   }, [data]);
@@ -178,7 +237,8 @@ export const ResultDisplay = ({ data }: ResultDisplayProps) => {
                     aria-label="Select all"
                   />
                 </TableHead>
-                <TableHead className="w-[55%]">Path</TableHead>
+                <TableHead className="w-[30%]">Path</TableHead>
+                <TableHead className="w-[30%]">Route</TableHead>
                 <TableHead className="w-[10%]">Create</TableHead>
                 <TableHead className="w-[10%]">Read</TableHead>
                 <TableHead className="w-[10%]">Edit</TableHead>
@@ -212,12 +272,34 @@ export const ResultDisplay = ({ data }: ResultDisplayProps) => {
                           const next = [...prev];
                           const updated: EditableRow = { ...next[idx], path: value };
                           if (updated.baseInferred) {
-                            updated.roleBase = inferRoleBaseFromPath(value);
+                            updated.route = findBestRouteMatch(value);
+                            updated.roleBase = inferRoleBaseFromRoute(updated.route);
                           }
                           next[idx] = updated;
                           return next;
                         });
                       }}
+                    />
+                  </TableCell>
+                  <TableCell className="align-top">
+                    <Combobox
+                      value={row.route}
+                      onValueChange={(value) => {
+                        setRows((prev) => {
+                          const next = [...prev];
+                          const updated: EditableRow = { 
+                            ...next[idx], 
+                            route: value,
+                            roleBase: inferRoleBaseFromRoute(value),
+                            baseInferred: false
+                          };
+                          next[idx] = updated;
+                          return next;
+                        });
+                      }}
+                      options={policyRoutes}
+                      placeholder="Select route"
+                      emptyMessage="No route found."
                     />
                   </TableCell>
                   <TableCell className="align-top">
@@ -229,7 +311,8 @@ export const ResultDisplay = ({ data }: ResultDisplayProps) => {
                           const next = [...prev];
                           const updated: EditableRow = { ...next[idx], create: isChecked };
                           if (!updated.roleBase) {
-                            updated.roleBase = inferRoleBaseFromPath(updated.path);
+                            updated.route = findBestRouteMatch(updated.path);
+                            updated.roleBase = inferRoleBaseFromRoute(updated.route);
                             updated.baseInferred = true;
                           }
                           next[idx] = updated;
@@ -248,7 +331,8 @@ export const ResultDisplay = ({ data }: ResultDisplayProps) => {
                           const next = [...prev];
                           const updated: EditableRow = { ...next[idx], read: isChecked };
                           if (!updated.roleBase) {
-                            updated.roleBase = inferRoleBaseFromPath(updated.path);
+                            updated.route = findBestRouteMatch(updated.path);
+                            updated.roleBase = inferRoleBaseFromRoute(updated.route);
                             updated.baseInferred = true;
                           }
                           next[idx] = updated;
@@ -267,7 +351,8 @@ export const ResultDisplay = ({ data }: ResultDisplayProps) => {
                           const next = [...prev];
                           const updated: EditableRow = { ...next[idx], edit: isChecked };
                           if (!updated.roleBase) {
-                            updated.roleBase = inferRoleBaseFromPath(updated.path);
+                            updated.route = findBestRouteMatch(updated.path);
+                            updated.roleBase = inferRoleBaseFromRoute(updated.route);
                             updated.baseInferred = true;
                           }
                           next[idx] = updated;
